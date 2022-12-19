@@ -1,3 +1,5 @@
+/* eslint-disable import/first */
+// eslint-disable-next-line
 const {
   Token,
   Fetcher,
