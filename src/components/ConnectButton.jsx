@@ -1,5 +1,5 @@
 import React from "react";
-import PageButton from "./PageButton";
+import PageButton from "./../components/PageButton";
 
 const ConnectButton = (props) => {
   const { isConnected, signerAddress, getSigner, provider } = props;

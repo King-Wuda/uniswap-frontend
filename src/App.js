@@ -2,7 +2,6 @@ import "./App.css";
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { GearFill } from "react-bootstrap-icons";
-const UNISWAP = require("@uniswap/sdk");
 
 import PageButton from "./components/PageButton";
 import ConnectButton from "./components/ConnectButton";
@@ -17,7 +16,7 @@ import {
   runSwap,
 } from "./AlphaRouterService";
 
-function App() {
+export default function App() {
   const [provider, setProvider] = useState(undefined);
   const [signer, setSigner] = useState(undefined);
   const [signerAddress, setSignerAddress] = useState(undefined);
@@ -74,25 +73,19 @@ function App() {
     getWalletAddress();
   }
 
-  const WETH = new Token(
-    UNISWAP.ChainId.GÖRLI,
-    "0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6",
-    18
-  );
-
-  const UNI = new Token(
-    UNISWAP.ChainId.GÖRLI,
-    "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
-    18
-  );
-
   const getSwapPrice = (inputAmount) => {
     setLoading(true);
     setInputAmount(inputAmount);
 
-    const swap = getPrice(inputAmount, WETH, UNI).then((data) => {
-      setOutputAmount(data[0]);
-      setRatio(data[1]);
+    const swap = getPrice(
+      inputAmount,
+      slippageAmount,
+      Math.floor(Date.now() / 1000 + deadlineMinutes * 60),
+      signerAddress
+    ).then((data) => {
+      setTransaction(data[0]);
+      setOutputAmount(data[1]);
+      setRatio(data[2]);
       setLoading(false);
     });
   };
@@ -182,5 +175,3 @@ function App() {
     </div>
   );
 }
-
-export default App;

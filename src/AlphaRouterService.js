@@ -1,142 +1,83 @@
-/* eslint-disable import/first */
-// eslint-disable-next-line
-// import/first : 0
+const { AlphaRouter } = require("@uniswap/smart-order-router");
 const {
   Token,
-  Fetcher,
-  Route,
-  Trade,
-  TokenAmount,
+  CurrencyAmount,
   TradeType,
   Percent,
-} = require("@uniswap/sdk");
-const UNISWAP = require("@uniswap/sdk");
-const ERC20ABI = require("./abi.json");
-const { ethers } = require("ethers");
+} = require("@uniswap/sdk-core");
+const { ethers, BigNumber } = require("ethers");
 const JSBI = require("jsbi");
+const ERC20ABI = require("./abi.json");
 
+const V3_SWAP_ROUTER_ADDRESS = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45";
 const REACT_APP_INFURA_URL_TESTNET = process.env.REACT_APP_INFURA_URL_TESTNET;
+
+const chainId = 5;
 
 const web3Provider = new ethers.providers.JsonRpcProvider(
   REACT_APP_INFURA_URL_TESTNET
 );
+const router = new AlphaRouter({ chainId: chainId, provider: web3Provider });
 
-const UNISWAP_ROUTER_ADDRESS = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
-const UNISWAP_ROUTER_ABI = require("./router.json");
-const UNISWAP_ROUTER_CONTRACT = new ethers.Contract(
-  UNISWAP_ROUTER_ADDRESS,
-  UNISWAP_ROUTER_ABI,
-  web3Provider
-);
+const name0 = "Wrapped Ether";
+const symbol0 = "WETH";
+const decimals0 = 18;
+const address0 = "0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6";
 
-export const WETH = new Token(
-  UNISWAP.ChainId.GÖRLI,
-  "0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6",
-  18
-);
+const name1 = "Uniswap Token";
+const symbol1 = "UNI";
+const decimals1 = 18;
+const address1 = "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984";
 
-export const UNI = new Token(
-  UNISWAP.ChainId.GÖRLI,
-  "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
-  18
-);
+const WETH = new Token(chainId, address0, decimals0, symbol0, name0);
+const UNI = new Token(chainId, address1, decimals1, symbol1, name1);
 
 export const getWethContract = () =>
-  new ethers.Contract(
-    "0xB4FBF271143F4FBf7B91A5ded31805e42b2208d6",
-    ERC20ABI,
-    web3Provider
-  );
+  new ethers.Contract(address0, ERC20ABI, web3Provider);
 export const getUniContract = () =>
-  new ethers.Contract(
-    "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
-    ERC20ABI,
-    web3Provider
-  );
+  new ethers.Contract(address1, ERC20ABI, web3Provider);
 
-export const getPrice = async (inputAmount, token1, token2) => {
-  const pair = await Fetcher.fetchPairData(token1, token2, web3Provider); //creating instances of a pair
-  const sellRoute = new Route([pair], token1);
-  const sellTrade = Trade.exactOut(
-    sellRoute,
-    new TokenAmount(token2, JSBI.BigInt(1e18))
-  );
-  const ratio = sellTrade.executionPrice.toSignificant(6);
-  const quoteAmountOut = inputAmount * ratio;
+export const getPrice = async (
+  inputAmount,
+  slippageAmount,
+  deadline,
+  walletAddress
+) => {
+  const percentSlippage = new Percent(slippageAmount, 100);
+  const wei = ethers.utils.parseUnits(inputAmount.toString(), decimals0);
+  const currencyAmount = CurrencyAmount.fromRawAmount(WETH, JSBI.BigInt(wei));
 
-  return [quoteAmountOut.toFixed(3), ratio];
-  // return [5, 0.05];
+  const route = await router.route(currencyAmount, UNI, TradeType.EXACT_INPUT, {
+    recipient: walletAddress,
+    slippageTolerance: percentSlippage,
+    deadline: deadline,
+  });
+
+  console.log(`Quote Exact In: ${route.quote.toFixed(2)}`);
+  console.log(`Gas Adjusted Quote In: ${route.quoteGasAdjusted.toFixed(2)}`);
+  console.log(`Gas Used USD: ${route.estimatedGasUsedUSD.toFixed(6)}`);
+
+  const transaction = {
+    data: route.methodParameters.calldata,
+    to: V3_SWAP_ROUTER_ADDRESS,
+    value: BigNumber.from(route.methodParameters.value),
+    from: walletAddress,
+    gasPrice: BigNumber.from(route.gasPriceWei),
+    gasLimit: ethers.utils.hexlify(1000000),
+  };
+
+  const quoteAmountOut = route.quote.toFixed(6);
+  const ratio = (inputAmount / quoteAmountOut).toFixed(3);
+
+  return [transaction, quoteAmountOut, ratio];
 };
 
-export const runSwap = async (signer) => {
-  swapTokens(WETH, UNI, signer, 0.02);
+export const runSwap = async (transaction, signer) => {
+  const approvalAmount = ethers.utils.parseUnits("10", 18).toString();
+  const contract0 = getWethContract();
+  await contract0
+    .connect(signer)
+    .approve(V3_SWAP_ROUTER_ADDRESS, approvalAmount);
+
+  signer.sendTransaction(transaction);
 };
-
-async function swapTokens(token1, token2, amount, signer, slippage = "50") {
-  try {
-    const pair = await Fetcher.fetchPairData(token1, token2, web3Provider); //creating instances of a pair
-    const route = await new Route([pair], token2); // a fully specified path from input token to output token
-    let amountIn = ethers.utils.parseEther(amount.toString()); //helper function to convert ETH to Wei
-    amountIn = amountIn.toString();
-
-    const slippageTolerance = new Percent(slippage, "10000"); // 50 bips, or 0.50% - Slippage tolerance
-
-    const trade = new Trade( //information necessary to create a swap transaction.
-      route,
-      new TokenAmount(token2, amountIn),
-      TradeType.EXACT_INPUT
-    );
-
-    const amountOutMin = trade.minimumAmountOut(slippageTolerance).raw; // needs to be converted to e.g. hex
-    const amountOutMinHex = ethers.BigNumber.from(
-      amountOutMin.toString()
-    ).toHexString();
-    const path = [token2.address, token1.address]; //An array of token addresses
-    const to = signer.address; // should be a checksummed recipient address
-    const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes from the current Unix time
-    const value = trade.inputAmount.raw; // // needs to be converted to e.g. hex
-    const valueHex = await ethers.BigNumber.from(
-      value.toString()
-    ).toHexString(); //convert to hex string
-
-    //Return a copy of transactionRequest, The default implementation calls checkTransaction and resolves to if it is an ENS name, adds gasPrice, nonce, gasLimit and chainId based on the related operations on Signer.
-    const rawTxn =
-      await UNISWAP_ROUTER_CONTRACT.populateTransaction.swapExactETHForTokens(
-        amountOutMinHex,
-        path,
-        to,
-        deadline,
-        {
-          value: valueHex,
-        }
-      );
-
-    //Returns a Promise which resolves to the transaction.
-    let sendTxn = signer.sendTransaction(rawTxn);
-
-    //Resolves to the TransactionReceipt once the transaction has been included in the chain for x confirms blocks.
-    let reciept = (await sendTxn).wait();
-
-    //Logs the information about the transaction it has been mined.
-    // if (reciept) {
-    //   console.log(
-    //     " - Transaction is mined - " + "\n" + "Transaction Hash:",
-    //     (await sendTxn).hash +
-    //       "\n" +
-    //       "Block Number: " +
-    //       (await reciept).blockNumber +
-    //       "\n" +
-    //       "Navigate to https://goerli.etherscan.io/txn/" +
-    //       (await sendTxn).hash,
-    //     "to see your transaction"
-    //   );
-    // } else {
-    //   console.log("Error submitting transaction");
-    // }
-  } catch (e) {
-    console.log(e);
-  }
-}
-
-//first argument = token we want, second = token we have, the amount we want
-//swapTokens(WETH, UNI, 0.02);
